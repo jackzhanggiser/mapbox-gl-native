@@ -16,6 +16,12 @@ class VectorTileLayer;
 using packed_iter_type = protozero::iterator_range<protozero::pbf_reader::const_uint32_iterator>;
 
 struct VectorTileLayerData {
+    VectorTileLayerData(std::shared_ptr<const std::string>);
+    
+    // Hold a reference to the underlying pbf data that backs the lazily-built
+    // components of the owning VectorTileLayer and VectorTileFeature objects
+    std::shared_ptr<const std::string> data;
+    
     uint32_t version = 1;
     uint32_t extent = 4096;
     std::unordered_map<std::string, uint32_t> keysMap;
@@ -43,7 +49,7 @@ private:
     
 class VectorTileLayer : public GeometryTileLayer {
 public:
-    VectorTileLayer(protozero::pbf_reader);
+    VectorTileLayer(protozero::pbf_reader, std::shared_ptr<const std::string>);
 
     std::size_t featureCount() const override { return features.size(); }
     std::unique_ptr<GeometryTileFeature> getFeature(std::size_t) const override;
@@ -122,7 +128,7 @@ Value parseValue(protozero::pbf_reader data) {
 }
 
 VectorTileFeature::VectorTileFeature(protozero::pbf_reader feature_pbf, std::shared_ptr<VectorTileLayerData> layerData_)
-    : layerData(layerData_) {
+    : layerData(std::move(layerData_)) {
     while (feature_pbf.next()) {
         switch (feature_pbf.tag()) {
         case 1: // id
@@ -254,7 +260,7 @@ const GeometryTileLayer* VectorTileData::getLayer(const std::string& name) const
         parsed = true;
         protozero::pbf_reader tile_pbf(*data);
         while (tile_pbf.next(3)) {
-            VectorTileLayer layer(tile_pbf.get_message());
+            VectorTileLayer layer(tile_pbf.get_message(), data);
             layers.emplace(layer.name, std::move(layer));
         }
     }
@@ -266,9 +272,13 @@ const GeometryTileLayer* VectorTileData::getLayer(const std::string& name) const
     return nullptr;
 }
 
-VectorTileLayer::VectorTileLayer(protozero::pbf_reader layer_pbf) {
-    data = std::make_shared<VectorTileLayerData>();
-    
+VectorTileLayerData::VectorTileLayerData(std::shared_ptr<const std::string> pbfData) :
+    data(std::move(pbfData))
+{}
+
+VectorTileLayer::VectorTileLayer(protozero::pbf_reader layer_pbf, std::shared_ptr<const std::string> pbfData)
+    : data(std::make_shared<VectorTileLayerData>(std::move(pbfData)))
+{
     while (layer_pbf.next()) {
         switch (layer_pbf.tag()) {
         case 1: // name
